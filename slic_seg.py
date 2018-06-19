@@ -20,7 +20,20 @@ for filename in file_list:
 		# apply SLIC and extract (approximately) the supplied number
 		# of segments
 	segments = slic(image, n_segments = numSegments[1], sigma = 5)
- 
+	for (i, segVal) in enumerate(np.unique(segments)):
+		mask = np.zeros(image.shape[:2], dtype = "uint8")
+		mask[segments == segVal] = 255
+		_, contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+		#pts = np.where((segments==segVal))
+		for pt in kp:
+
+		if cv2.pointPolygonTest(contours[0], pt, False):
+			fg.append(segVal)
+
+
+
+
+
 	# show the output of SLIC
 	#fig = plt.figure("Superpixels -- %d segments" % (numSegments))
 	#ax = fig.add_subplot(1, 1, 1)
