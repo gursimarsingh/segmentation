@@ -2,6 +2,7 @@ from skimage.segmentation import slic
 from skimage.segmentation import mark_boundaries
 from skimage.util import img_as_float
 from skimage import io
+from skimage.draw import circle, line_aa, polygon
 #from  raw_read import get_mask
 import cv2 
 import numpy as np
@@ -10,7 +11,7 @@ import os
 import argparse
 img_src = 'Lifting/images'
 csv_src  = 'Lifting/csv'
-dst = 'grab_cut/Lifting'
+dst = 'grab_cut/Lifting2'
 # construct the argument parser and parse the arguments
 # ap = argparse.ArgumentParser()
 # ap.add_argument("-i", "--image", required = True, help = "Path to the image")
@@ -62,7 +63,53 @@ def create_rect(pt,h,w):
 		rect[3]=h
 
 	return rect
+def add_limb(kp1,kp2,mask,point_radius=7):
+	MISSING_VALUE =0
+	from_missing = kp1[0] == MISSING_VALUE or kp1[1] == MISSING_VALUE
+	to_missing = kp2[0] == MISSING_VALUE or kp2[1] == MISSING_VALUE
+		#from_missing = kp1[2] == MISSING_VALUE
+		#to_missing = kp2[2] == MISSING_VALUE
+	if from_missing or to_missing:
+	    return mask
+	img_size = (h,w)
+	kp1 = np.asarray(kp1[0:2])
+	kp2 = np.asarray(kp2[0:2])
+	norm_vec = kp1 - kp2
+	norm_vec = np.array([-norm_vec[1],norm_vec[0]])
+	norm_vec = point_radius * norm_vec / np.linalg.norm(norm_vec)
 
+
+	vetexes = np.array([
+	    kp1 + norm_vec,
+	    kp1 - norm_vec,
+	    kp2 - norm_vec,
+	    kp2 + norm_vec
+	])
+#pdb.set_trace()
+	yy, xx = polygon(vetexes[:, 1], vetexes[:, 0], shape=img_size)
+	mask[yy, xx] = 255
+
+	yy, xx = circle(kp1[1], kp1[0], radius=point_radius, shape=img_size)
+	mask[yy, xx] = 255
+	yy, xx = circle(kp2[1], kp2[0], radius=point_radius, shape=img_size)
+	mask[yy, xx] = 255
+
+	return mask
+def ret_mid_pt(kp):
+	# rsh = np.asarray(kp[2]) 
+	# lsh = np.asarray(kp[5])
+	# lhip = np.asarray(kp[11])
+	# rhip= np.asarray(kp[8])
+	# pt = [rsh[0:2],lsh[0:2],lhip[0:2],rhip[0:2]]
+	bck = np.asarray([0,0])
+	i=0
+	for p in kp:
+		if p[0]!=0 and p[1]!=0:
+			bck = bck+np.asarray(p[0:2])
+			i=i+1
+	bck = bck/i
+	#kp.append(list(bck.astype(np.uint8)))
+	return list(bck.astype(np.uint8))
 # def read_raw(filename,r,c):
 # 	fd = open(os.path.join(mask_src,filename.split('.')[0] + '.raw' ), 'rb')
 
@@ -85,8 +132,20 @@ for filename in file_list:
 
 	kp=read_csv(filename) 
 	bg,sure_fg = g.mask_generate(kp,h,w)
+
+	mid_hip = ret_mid_pt([kp[8],kp[11]])
+	sure_fg = add_limb(kp[1],mid_hip,sure_fg)
+	# sure_fg2 = add_limb(kp[1],kp[11],sure_fg)
+	# sure_fg2 = add_limb(kp[1],kp[8],sure_fg2)
+	sure_fg = add_limb(kp[5],kp[8],sure_fg)
+	sure_fg = add_limb(kp[2],kp[11],sure_fg)
+	# sure_fg2 = add_limb(kp[2],kp[8],sure_fg2)
+	# sure_fg2 = add_limb(kp[5],kp[11],sure_fg2)
+
 	fg_orig = sure_fg.copy()
-	cv2.imshow('s',sure_fg)
+	#fg_orig2 = sure_fg2.copy()
+	sure_fg2 = sure_fg.copy()
+	cv2.imshow('s',sure_fg2)
 	# loop over the number of segments
 	numSegments = [100, 200, 300]
 		
@@ -105,7 +164,7 @@ for filename in file_list:
 		if len(contours)>0:
 			inter_area= cv2.contourArea(contours[0])
 			if inter_area>seg_area*0.4:
-				sure_fg[mask==255] =255
+				sure_fg2[mask==255] =255
 
 		#cv2.imshow('ssds',mask)
 		
@@ -129,8 +188,8 @@ for filename in file_list:
 	# mask2 =  np.where(mask2[:,:]==255,1,0)
 	kernel =cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
 
-	sure_fg = cv2.morphologyEx(sure_fg,cv2.MORPH_CLOSE,kernel,iterations=2)
-	mask2 =  np.where(sure_fg[:,:]==255,1,0).astype('uint8')
+	sure_fg2 = cv2.morphologyEx(sure_fg2,cv2.MORPH_CLOSE,kernel,iterations=2)
+	mask2 =  np.where(sure_fg2[:,:]==255,1,0).astype('uint8')
 	img2 = image*mask2[:,:,np.newaxis]
 
 ##########################################################################
@@ -158,7 +217,9 @@ for filename in file_list:
 	mask, bgdModel, fgdModel = cv2.grabCut(img,init_mask,None,bgdModel,fgdModel,3,cv2.GC_INIT_WITH_MASK)
 	mask = np.where((mask==2)|(mask==0),0,mask).astype('uint8')
 	mask = np.where((mask==3)|(mask==1),3,mask).astype('uint8')
-	#mask[mask2==1]=3
+
+	#mask[sure_fg==1]=3
+
 	mask[fg_orig==255]=1
 
 	mask, bgdModel, fgdModel = cv2.grabCut(img,mask,None,bgdModel,fgdModel,3,cv2.GC_INIT_WITH_MASK)
@@ -168,7 +229,7 @@ for filename in file_list:
 	#mask= cv2.bitwise_or(mask,mask2)
 	img1 = img*mask[:,:,np.newaxis]
 	re=cv2.resize(img1,(64,128),interpolation = cv2.INTER_AREA)
-
+	mask = np.where((mask==1),255,0).astype('uint8')
 	# mm = get_mask(filename)
 	# bgdModel = np.zeros((1,65),np.float64)
 	# fgdModel = np.zeros((1,65),np.float64)
@@ -184,7 +245,7 @@ for filename in file_list:
 	#ax = fig.add_subplot(1, 1, 1)
 	#cv2.imshow('re',mark_boundaries(image, segments))
 	cv2.imshow('mask',img1)
-	cv2.imwrite(os.path.join(dst,filename),re)
+	cv2.imwrite(os.path.join(dst,filename),mask)
 	cv2.imshow('mask222',sure_fg)
 	#plt.axis("off")
 	cv2.waitKey(1)
